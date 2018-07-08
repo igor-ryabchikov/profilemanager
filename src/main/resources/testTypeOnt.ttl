@@ -1,0 +1,4 @@
+@prefix pm: <http://profmanager.com/> .
+pm:User pm:prop pm:B .
+pm:C pm:prop pm:B .
+pm:C pm:prop pm:D .

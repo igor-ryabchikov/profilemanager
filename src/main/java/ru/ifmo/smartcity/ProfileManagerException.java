@@ -9,4 +9,10 @@ public class ProfileManagerException extends RuntimeException
     {
         super(message);
     }
+
+
+    public ProfileManagerException(Throwable t)
+    {
+        super(t);
+    }
 }

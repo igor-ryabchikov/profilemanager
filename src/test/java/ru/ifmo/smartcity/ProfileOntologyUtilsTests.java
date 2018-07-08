@@ -4,6 +4,7 @@ import org.apache.jena.rdf.model.Model;
 import org.apache.jena.rdf.model.ModelFactory;
 import org.apache.jena.rdf.model.Property;
 import org.apache.jena.rdf.model.Resource;
+import org.apache.jena.vocabulary.RDF;
 import org.apache.jena.vocabulary.RDFS;
 import org.junit.Assert;
 import org.junit.Test;
@@ -98,13 +99,13 @@ public class ProfileOntologyUtilsTests
                 "    <http://F> <http://p> <http://E>\n" +
                 "}";
 
-        Model res = ProfileOntologyUtils.getProfileMask(typeOnt, positivePattern);
+        Model res = ProfileOntologyUtils.buildProfileMask(typeOnt, positivePattern);
         Assert.assertEquals(4, res.size());
 
         boolean exception = false;
         try
         {
-            ProfileOntologyUtils.getProfileMask(typeOnt, badPattern);
+            ProfileOntologyUtils.buildProfileMask(typeOnt, badPattern);
         }
         catch (ProfileManagerException e)
         {
@@ -119,8 +120,83 @@ public class ProfileOntologyUtilsTests
     @Test
     public void applyMaskTest()
     {
-        // TODO:
-        // 1) Создать онтологию типов, профиль и маску. Так, чтобы были висящие незаданные в онтологии типов концепты. И с несколькими путями!!!
-        // 2) Проверить, что в возвращаемом результате все пути
+        Model typeOnt = ModelFactory.createDefaultModel();
+        Resource User = typeOnt.createResource("http://profmanager.com/User");
+        Resource user = typeOnt.createResource("http://user");
+
+        Resource B = typeOnt.createResource("http://B");
+        Resource b = typeOnt.createResource("http://b");
+
+        Resource C = typeOnt.createResource("http://C");
+        Resource c = typeOnt.createResource("http://c");
+
+        Resource D = typeOnt.createResource("http://D");
+        Resource d = typeOnt.createResource("http://d");
+
+        Resource BCPropObj = typeOnt.createResource("http://BCProp0Obj");
+        Resource bCPropObj = typeOnt.createResource("http://bCProp0Obj");
+
+        Resource BCPropSubj = typeOnt.createResource("http://BCProp1Subj");
+        Resource bCPropSubj = typeOnt.createResource("http://bCProp1Subj");
+
+        Resource DPropObj = typeOnt.createResource("http://DPropObj");
+        Resource dPropObj = typeOnt.createResource("http://dPropObj");
+
+        Property prop = typeOnt.createProperty("http://prop");
+
+        typeOnt.add(User, prop, B);
+        typeOnt.add(C, prop, B);
+        typeOnt.add(C, prop, D);
+
+        Model mask = ModelFactory.createDefaultModel();
+        mask.add(User, prop, B);
+        mask.add(C, prop, B);
+
+        Model prof = ModelFactory.createDefaultModel();
+        prof.add(user, RDF.type, User);
+        prof.add(b, RDF.type, B);
+        prof.add(c, RDF.type, C);
+        prof.add(d, RDF.type, D);
+        prof.add(bCPropObj, RDF.type, BCPropObj);
+        prof.add(bCPropSubj, RDF.type, BCPropSubj);
+        prof.add(dPropObj, RDF.type, DPropObj);
+
+        prof.add(user, prop, b);
+        prof.add(c, prop, b);
+        prof.add(c, prop, d);
+        prof.add(user, prop, b);
+        prof.add(user, prop, b);
+
+        prof.add(c, prop, bCPropObj);
+        prof.add(bCPropSubj, prop, c);
+        prof.add(b, prop, bCPropObj);
+        prof.add(bCPropSubj, prop, b);
+        prof.add(d, prop, dPropObj);
+        prof.add(bCPropSubj, prop, bCPropObj);
+
+        Model fProf = ProfileOntologyUtils.applyMask(prof, typeOnt, mask);
+
+        Model expectedFProf = ModelFactory.createDefaultModel();
+        expectedFProf.add(user, RDF.type, User);
+        expectedFProf.add(b, RDF.type, B);
+        expectedFProf.add(c, RDF.type, C);
+        expectedFProf.add(bCPropObj, RDF.type, BCPropObj);
+        expectedFProf.add(bCPropSubj, RDF.type, BCPropSubj);
+
+        expectedFProf.add(user, prop, b);
+        expectedFProf.add(c, prop, b);
+        expectedFProf.add(user, prop, b);
+        expectedFProf.add(user, prop, b);
+
+        expectedFProf.add(c, prop, bCPropObj);
+        expectedFProf.add(bCPropSubj, prop, c);
+        expectedFProf.add(b, prop, bCPropObj);
+        expectedFProf.add(bCPropSubj, prop, b);
+        expectedFProf.add(bCPropSubj, prop, bCPropObj);
+
+        if (!expectedFProf.isIsomorphicWith(fProf))
+        {
+            throw new AssertionError("Models are not isomorphic:\n"+expectedFProf.toString()+"\n"+fProf.toString());
+        }
     }
 }
