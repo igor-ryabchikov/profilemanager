@@ -122,7 +122,7 @@ public class ProfileOntologyUtilsTests
     {
         Model typeOnt = ModelFactory.createDefaultModel();
         Resource User = typeOnt.createResource("http://profmanager.com/User");
-        Resource user = typeOnt.createResource("http://user");
+        Resource user = typeOnt.createResource("http://profmanager.com/user0");
 
         Resource B = typeOnt.createResource("http://B");
         Resource b = typeOnt.createResource("http://b");
@@ -174,7 +174,7 @@ public class ProfileOntologyUtilsTests
         prof.add(d, prop, dPropObj);
         prof.add(bCPropSubj, prop, bCPropObj);
 
-        Model fProf = ProfileOntologyUtils.applyMask(prof, typeOnt, mask);
+        Model fProf = ProfileOntologyUtils.applyMask(prof, typeOnt, mask, "user0");
 
         Model expectedFProf = ModelFactory.createDefaultModel();
         expectedFProf.add(user, RDF.type, User);

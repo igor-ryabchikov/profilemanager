@@ -2,7 +2,6 @@ package ru.ifmo.smartcity;
 
 import guru.nidi.graphviz.attribute.Color;
 import guru.nidi.graphviz.attribute.Shape;
-import guru.nidi.graphviz.attribute.Style;
 import guru.nidi.graphviz.engine.Format;
 import guru.nidi.graphviz.engine.Graphviz;
 import guru.nidi.graphviz.model.Factory;
@@ -22,17 +21,11 @@ import org.apache.jena.vocabulary.RDFS;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.zip.ZipEntry;
-import java.util.zip.ZipInputStream;
-import java.util.zip.ZipOutputStream;
+import java.util.zip.*;
 
 /**
  * Created by igor on 01.07.18.
@@ -56,19 +49,12 @@ public class ProfileOntologyUtils {
 
     private static final String ADD_PARENT_PROPERTIES_SPARQL =
             "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n" +
-                    "INSERT { ?cl ?pProp ?pObj}\n" +
+                    "INSERT { ?s ?pProp ?o . }\n" +
                     "WHERE {\n" +
-                    "?cl rdfs:subClassOf+ ?pCl .\n" +
-                    "?pCl ?pProp ?pObj .\n" +
-                    "?pCl !rdfs:subClassOf ?pObj\n" +
-                    "}";
-    private static final String ADD_PARENT_PROPERTIES_INV_SPARQL =
-            "PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>\n" +
-                    "INSERT {?pSubj ?pInverseProp ?cl}\n" +
-                    "WHERE {\n" +
-                    "?cl rdfs:subClassOf+ ?pCl .\n" +
-                    "?pSubj ?pInverseProp ?pCl .\n" +
-                    "?pSubj !rdfs:subClassOf ?pCl\n" +
+                    "?s rdfs:subClassOf* ?pS .\n" +
+                    "?o rdfs:subClassOf* ?oS .\n" +
+                    "?pS ?pProp ?oS .\n" +
+                    "FILTER( rdfs:subClassOf != ?pProp) \n" +
                     "}";
 
     private static final String GET_VALID_CONCEPTS_COUNT_SPARQL =
@@ -78,13 +64,6 @@ public class ProfileOntologyUtils {
                     "}";
 
 
-    /*private static final String FILTER_EXTRA_TRIPLES_SPARQL = "CONSTRUCT WHERE {\n" +
-            "    <http://profmanager.com/User> (!(<http://NotUsedPred>|^<http://NotUsedPred>))* ?c0 .\n" +
-            "    <http://profmanager.com/User> (!(<http://NotUsedPred>|^<http://NotUsedPred>))* ?c1 .\n" +
-            "    ?c0 ?p ?c1 .\n" +
-            "}";
-    */
-
     /**
      * Добавляет родительские свойства дочерним для окончательного офрмирвоания онтологии типов.
      *
@@ -92,7 +71,6 @@ public class ProfileOntologyUtils {
      */
     public static void addParentProperties(Model typeOntologyWithoutParentProp) {
         UpdateAction.parseExecute(ADD_PARENT_PROPERTIES_SPARQL, typeOntologyWithoutParentProp);
-        UpdateAction.parseExecute(ADD_PARENT_PROPERTIES_INV_SPARQL, typeOntologyWithoutParentProp);
     }
 
 
@@ -172,7 +150,7 @@ public class ProfileOntologyUtils {
             nodes.add(st.getObject());
         }
 
-        return cCount == nodes.size();
+        return cCount == nodes.size()-1;
     }
 
 
@@ -199,17 +177,16 @@ public class ProfileOntologyUtils {
      * @param mask            маска
      * @return результирующая онтология
      */
-    public static Model applyMask(Model profileOntology, Model typeOntology, Model mask)
+    public static Model applyMask(Model profileOntology, Model typeOntology, Model mask, String userLogin)
     {
-        Query typeOQuery = QueryFactory.create(buildMaskSelectQuery(typeOntology));
-        QueryExecution typeOQExec = QueryExecutionFactory.create(typeOQuery, profileOntology);
-        Model typeOProfile = typeOQExec.execConstruct();
-        typeOQExec.close();
+        Model m = ModelFactory.createDefaultModel();
+        m.add(mask);
+        addSubClassesToMask(typeOntology, m);
+        addParentProperties(m);
 
-        Query maskQuery = QueryFactory.create(buildMaskSelectQuery(mask));
-        QueryExecution maskQExec = QueryExecutionFactory.create(maskQuery, profileOntology);
-        Model maskProfile = maskQExec.execConstruct();
-        maskQExec.close();
+        String userURI = BASE_URL+userLogin;
+        Model typeOProfile = filterByMask(profileOntology, typeOntology, userURI);
+        Model maskProfile = filterByMask(profileOntology, m, userURI);
 
         Set<Resource> restrictedResources = getResourcesSet(typeOProfile);
         Set<Resource> selectedResources = getResourcesSet(maskProfile);
@@ -217,10 +194,6 @@ public class ProfileOntologyUtils {
         Model extraTriplesModel = ModelFactory.createDefaultModel();
         extraTriplesModel.add(profileOntology);
         extraTriplesModel.remove(typeOProfile);
-
-        System.out.println("MaskProf: "+maskProfile.toString());
-        System.out.println("Selected res: "+selectedResources.toString());
-        System.out.println("Restricted res: "+restrictedResources.toString());
 
         long prevSize = 0;
         while (prevSize != extraTriplesModel.size())
@@ -234,7 +207,6 @@ public class ProfileOntologyUtils {
 
                 if ((selectedResources.contains(st.getSubject())
                         && (st.getObject().isLiteral() || selectedResources.contains(st.getObject().asResource())))
-
                         || (selectedResources.contains(st.getSubject()) && !restrictedResources.contains(st.getObject().asResource()))
                         || (st.getObject().isResource() && selectedResources.contains(st.getObject().asResource()) && !restrictedResources.contains(st.getSubject())))
                 {
@@ -251,6 +223,51 @@ public class ProfileOntologyUtils {
 
         return maskProfile;
     }
+
+
+    private static void addSubClassesToMask(Model typeOntology, Model mask)
+    {
+        Map<Resource, List<Resource>> classesMap = new HashMap<>();
+        StmtIterator iter = typeOntology.listStatements();
+        while (iter.hasNext())
+        {
+            Statement st = iter.nextStatement();
+            if (st.getPredicate().equals(RDFS.subClassOf))
+            {
+                List<Resource> subClasses = classesMap.computeIfAbsent(st.getObject().asResource(), k -> new ArrayList<>());
+                subClasses.add(st.getSubject());
+            }
+        }
+
+        Model subClassesModel = ModelFactory.createDefaultModel();
+        iter = mask.listStatements();
+        while (iter.hasNext()) {
+            Statement st = iter.nextStatement();
+            addSubClassesFromMap(st.getSubject(), classesMap, subClassesModel);
+            if (st.getObject().isResource()) {
+                addSubClassesFromMap(st.getObject().asResource(), classesMap, subClassesModel);
+            }
+        }
+
+        mask.add(subClassesModel);
+    }
+
+
+    private static void addSubClassesFromMap(Resource resource, Map<Resource, List<Resource>> classesMap, Model subClassesModel)
+    {
+        List<Resource> subClasses = classesMap.get(resource);
+        if (subClasses == null) {
+            return;
+        }
+
+        // TODO: может произойти зацикливание - следует валидировать онтологию типов
+        for (Resource subClass : subClasses)
+        {
+            subClassesModel.add(subClass, RDFS.subClassOf, resource);
+            addSubClassesFromMap(subClass, classesMap, subClassesModel);
+        }
+    }
+
 
 
     private static Set<Resource> getResourcesSet(Model m)
@@ -270,72 +287,47 @@ public class ProfileOntologyUtils {
     }
 
 
-    private static String buildMaskSelectQuery(Model mask)
+    private static Model filterByMask(Model profile, Model mask, String userURI)
     {
-        Set<Resource> resources = new HashSet<>();
+        GNode pGraph = buildGraphFromModel(profile, userURI);
+        GNode maskGraph = buildGraphFromModel(mask, User.getURI());
 
-        StmtIterator iter = mask.listStatements();
-        while (iter.hasNext())
-        {
-            Statement st = iter.nextStatement();
-            resources.add(st.getSubject());
-            if (st.getObject().isResource())
+        Model filtered = ModelFactory.createDefaultModel();
+
+        pGraph.setVisited(true);
+        Queue<GNode> pNodes = new LinkedList<>();
+        pNodes.add(pGraph);
+
+        maskGraph.setVisited(true);
+        Queue<GNode> mNodes = new LinkedList<>();
+        mNodes.add(maskGraph);
+
+        while (!pNodes.isEmpty()) {
+            GNode pNode = pNodes.poll();
+            GNode mNode = mNodes.poll();
+
+            for (Edge edge : pNode.getEdges().values())
             {
-                resources.add(st.getObject().asResource());
+                Edge mEdge = mNode.getEdges().get(new PropName(edge.getProp().getURI(), edge.getEndNode().getType(), edge.isDirect()));
+                if (mEdge != null)
+                {
+                    if (mEdge.isDirect()) {
+                        filtered.add(pNode.getRdfNode().asResource(), edge.getProp(), edge.getEndNode().getRdfNode());
+                    } else {
+                        filtered.add(edge.getEndNode().getRdfNode().asResource(), edge.getProp(), pNode.getRdfNode());
+                    }
+
+                    if (!edge.getEndNode().isVisited()) {
+                        pNodes.add(edge.getEndNode());
+                        mNodes.add(mEdge.getEndNode());
+
+                        edge.getEndNode().setVisited(true);
+                    }
+                }
             }
         }
 
-        resources.remove(RDFS.Literal);
-
-        // Формируем конструирующий запрос
-
-        Map<Resource, String> resToVarMap = new HashMap<>();
-        int rCounter = 0;
-        for (Resource r : resources)
-        {
-            String rName = "r"+(rCounter++);
-            resToVarMap.put(r, rName);
-        }
-
-        // TODO: ОШИБКА - у пользователя может не быть всех элементов.
-        // TODO: Решение - либо ввести поиск по графу. Либо - ДОБАВИТЬ в аккаунт пользователя элементы, чтобы запрос выполнялся
-        // TODO: не уверен, будет ли работать второе
-
-        StringBuilder sb = new StringBuilder();
-        sb.append("CONSTRUCT {\n");
-
-        int lCounter = 0;
-        iter = mask.listStatements();
-        while (iter.hasNext())
-        {
-            Statement st = iter.nextStatement();
-            sb.append("?"+resToVarMap.get(st.getSubject()) + " <" + st.getPredicate().getURI() + "> ?"
-                    + (st.getObject().isResource() ? resToVarMap.get(st.getObject().asResource()) : "l"+(lCounter++)) + " .\n");
-        }
-
-        sb.append("} WHERE { \n");
-
-        for (Map.Entry<Resource, String> rEntry : resToVarMap.entrySet())
-        {
-            sb.append("?" + rEntry.getValue() + " <" + RDF.type + ">/<"+RDFS.subClassOf+">* <" + rEntry.getKey().getURI() + "> .\n");
-        }
-
-        lCounter = 0;
-        iter = mask.listStatements();
-        while (iter.hasNext())
-        {
-            Statement st = iter.nextStatement();
-            sb.append("?"+resToVarMap.get(st.getSubject()) + " <" + st.getPredicate().getURI() + "> ?"
-                    + (st.getObject().isResource() ? resToVarMap.get(st.getObject().asResource()) : "l"+(lCounter++)) + " .\n");
-            if (st.getObject().isLiteral())
-            {
-                sb.append("FILTER isLiteral(?l"+(lCounter-1)+") \n");
-            }
-        }
-
-        sb.append("}");
-
-        return sb.toString();
+        return filtered;
     }
 
 
@@ -400,31 +392,152 @@ public class ProfileOntologyUtils {
 
     public static byte[] serializeModelWithZip(Model model)
     {
-        ByteArrayOutputStream bout = new ByteArrayOutputStream(1024);
-        ZipOutputStream zip = new ZipOutputStream(bout);
-        ZipEntry ze = new ZipEntry("model");
         try {
-            zip.putNextEntry(ze);
-            model.write(zip, Lang.TURTLE.getName());
-            zip.closeEntry();
+            ByteArrayOutputStream bout = new ByteArrayOutputStream(1024);
+            GZIPOutputStream zout = new GZIPOutputStream(bout, 2048);
+            model.write(zout, Lang.TURTLE.getName());
+            zout.close();
+            return bout.toByteArray();
         } catch(IOException e) {
             throw new ProfileManagerException(e);
         }
-        return bout.toByteArray();
     }
 
 
     public static Model deserializeModelWithZip(byte[] sModel)
     {
-        ByteArrayInputStream bin = new ByteArrayInputStream(sModel);
-        ZipInputStream zip = new ZipInputStream(bin);
-        Model model = ModelFactory.createDefaultModel();
         try {
-            zip.getNextEntry();
-        } catch(IOException e) {
+            ByteArrayInputStream bin = new ByteArrayInputStream(sModel);
+            GZIPInputStream zin = new GZIPInputStream(bin);
+            Model model = ModelFactory.createDefaultModel();
+            model.read(zin, null, Lang.TURTLE.getName());
+            return model;
+        } catch (IOException e) {
             throw new ProfileManagerException(e);
         }
-        model.read(zip, null, Lang.TURTLE.getName());
-        return model;
+    }
+
+    private static GNode buildGraphFromModel(Model model, String rootNodeURI)
+    {
+        Map<String, GNode> nodes = new HashMap<>();
+        StmtIterator iter = model.listStatements();
+        while (iter.hasNext())
+        {
+            Statement st = iter.nextStatement();
+
+            GNode sNode = nodes.computeIfAbsent(st.getSubject().getURI(), k -> new GNode(st.getSubject()));
+            if (st.getPredicate().equals(RDF.type)) {
+                sNode.setType(st.getObject().asResource().getURI());
+            } else {
+                GNode oNode;
+                if (st.getObject().isResource()) {
+                    oNode = nodes.computeIfAbsent(st.getObject().asResource().getURI(), k -> new GNode(st.getObject()));
+                    oNode.addEdge(new Edge(st.getPredicate(), sNode, false));
+                } else {
+                    oNode = new GNode(st.getObject());
+                    oNode.setType(RDFS.Literal.getURI());
+                }
+                sNode.addEdge(new Edge(st.getPredicate(), oNode, true));
+            }
+        }
+
+        return nodes.get(rootNodeURI);
+    }
+
+    private static class GNode
+    {
+        private final RDFNode rdfNode;
+        private final Map<PropName, Edge> edges = new HashMap<>();
+        private String type;
+        private boolean isVisited;
+
+        public GNode(RDFNode rdfNode) {
+            this.rdfNode = rdfNode;
+        }
+
+        public RDFNode getRdfNode() {
+            return rdfNode;
+        }
+
+        public Map<PropName, Edge> getEdges() {
+            return edges;
+        }
+
+        public void addEdge(Edge e) {
+            edges.put(new PropName(e.getProp().getURI(), e.getEndNode().getRdfNode().isResource() ?
+                    e.getEndNode().getRdfNode().asResource().getURI() : e.getEndNode().getRdfNode().asLiteral().getLexicalForm(), e.isDirect()), e);
+        }
+
+        public String getType() {
+            return type;
+        }
+
+        public void setType(String type) {
+            this.type = type;
+        }
+
+        public boolean isVisited() {
+            return isVisited;
+        }
+
+        public void setVisited(boolean visited) {
+            isVisited = visited;
+        }
+    }
+
+
+    private static class Edge
+    {
+        private final Property prop;
+        private final GNode endNode;
+        private final boolean isDirect;
+
+        public Edge(Property prop, GNode endNode, boolean isDirect) {
+            this.prop = prop;
+            this.endNode = endNode;
+            this.isDirect = isDirect;
+        }
+
+        public Property getProp() {
+            return prop;
+        }
+
+        public GNode getEndNode() {
+            return endNode;
+        }
+
+        public boolean isDirect() {
+            return isDirect;
+        }
+    }
+
+
+    private static class PropName
+    {
+        private final String edgeName;
+        private final String nodeName;
+        private final boolean isDirect;
+
+        public PropName(String edgeName, String nodeName, boolean isDirect) {
+            this.edgeName = edgeName;
+            this.nodeName = nodeName;
+            this.isDirect = isDirect;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) return true;
+            if (o == null || getClass() != o.getClass()) return false;
+            PropName propName = (PropName) o;
+            return isDirect == propName.isDirect &&
+                    Objects.equals(edgeName, propName.edgeName) &&
+                    Objects.equals(nodeName, propName.nodeName);
+        }
+
+        @Override
+        public int hashCode() {
+
+            return Objects.hash(edgeName, nodeName, isDirect);
+        }
     }
 }

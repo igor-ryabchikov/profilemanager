@@ -156,7 +156,6 @@ public class ProfileServiceRightsAO {
 
         Model mask = ProfileOntologyUtils.buildProfileMask(typeProfileOntology, maskRequest);
 
-        // TODO: проверить запрос
         RightsRequest lastRightsRequest = rightsRequestRepository.findFirstByUserIdAndServiceIdOrderByIdDesc(user.getId(), service.getId());
         if (lastRightsRequest != null && lastRightsRequest.getAccepted() == null)
         {
@@ -181,7 +180,6 @@ public class ProfileServiceRightsAO {
             throw new ProfileManagerException("No user with login "+userLogin);
         }
 
-        // TODO: проверять, что подтверждает запросивший пользователь
         RightsRequest rightsRequest = rightsRequestRepository.findById(requestId);
 
         if (rightsRequest == null) {

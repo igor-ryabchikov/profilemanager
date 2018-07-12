@@ -86,7 +86,7 @@ public class UserAO {
             }
 
             Model mask = ProfileOntologyUtils.deserializeModelWithZip(serviceRights.getMask());
-            profile = ProfileOntologyUtils.applyMask(profile, typeProfileOntology, mask);
+            profile = ProfileOntologyUtils.applyMask(profile, typeProfileOntology, mask, userLogin);
         }
 
         Query query = QueryFactory.create(constructQuery);

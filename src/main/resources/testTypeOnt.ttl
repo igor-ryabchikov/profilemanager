@@ -1,4 +1,5 @@
 @prefix pm: <http://profmanager.com/> .
-pm:User pm:prop pm:B .
-pm:C pm:prop pm:B .
+pm:User pm:prop pm:BParent .
+pm:C pm:prop pm:BParent .
 pm:C pm:prop pm:D .
+pm:B <http://www.w3.org/2000/01/rdf-schema#subClassOf> pm:BParent .

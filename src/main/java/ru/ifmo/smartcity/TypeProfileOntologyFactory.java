@@ -8,7 +8,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 import java.io.FileInputStream;
-import java.io.FileReader;
 import java.io.IOException;
 
 /**
@@ -23,8 +22,12 @@ public class TypeProfileOntologyFactory {
     @Bean
     public Model typeProfileOntology() throws IOException
     {
-        Model typeProfileOntology = ModelFactory.createOntologyModel();
+        Model typeProfileOntology = ModelFactory.createDefaultModel();
         typeProfileOntology.read(new FileInputStream(typeProfileOntologyFilePath), null, Lang.TTL.getName());
+        ProfileOntologyUtils.addParentProperties(typeProfileOntology);
+        if (!ProfileOntologyUtils.isMaskValid(typeProfileOntology)) {
+            throw new ProfileManagerException("TypeOntology is not valid. All triples must be reached from pm:User concept");
+        }
         return typeProfileOntology;
     }
 }
